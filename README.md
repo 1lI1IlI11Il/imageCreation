@@ -13,6 +13,7 @@ Upload a spreadsheet, hit Generate, and watch dozens of AI images render in para
 | `.xlsx` / `.csv` with a `prompt` column | PNG images in `output/` |
 | Each row = one image job | Up to 4 variations per row |
 | Optional: style, mood, aspect ratio | Parallel generation (configurable) |
+| Batch completion state | `done` (all success) or `partial` (some failed) |
 
 ---
 
@@ -81,7 +82,7 @@ nano-batch/
 │   └── src/
 │       ├── App.tsx           # Tab layout: Generate | Settings
 │       ├── components/       # UploadPanel, SettingsPanel, ProgressGrid, ImageCard, Lightbox
-│       └── hooks/useJob.ts   # Polling-based job state management
+│       └── hooks/useJob.ts   # Non-overlapping polling-based job state
 │
 └── output/                   # Generated images (gitignored)
     └── [job-id]/
@@ -126,6 +127,22 @@ Settings are stored in `~/.nano-batch/config.json` (never committed).
 | Excel parsing | [xlsx](https://sheetjs.com/) |
 | ZIP export | [JSZip](https://stuk.github.io/jszip/) |
 | Image API | Google Gemini (Imagen 4 / nano banana) |
+
+---
+
+## Recent Refactor Notes
+
+- Batch scheduler simplified to bounded worker execution for lower overhead.
+- Frontend polling changed to non-overlapping loop (`setTimeout` + in-flight guard).
+- Image save and ZIP assembly now use parallel filesystem reads/writes.
+- TypeScript settings updated for `.ts` imports in this Node runtime setup.
+
+### Quick verification
+
+```bash
+npx tsc --noEmit
+npm run build
+```
 
 ---
 

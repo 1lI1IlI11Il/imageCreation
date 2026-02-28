@@ -124,26 +124,47 @@ After initial testing, 3 bugs were found and fixed in parallel:
 
 ## 6. Key Design Decisions
 
-### Why Promise Pool for Concurrency?
-Instead of `Promise.all()` (which fires everything at once) or sequential processing, a promise pool limits active concurrent requests:
+### Why Bounded Worker Scheduling for Concurrency?
+Instead of `Promise.all()` (which fires everything at once) or a mutable executing-array pool, the current implementation uses fixed workers and strided iteration:
 
 ```ts
-const executing: Promise<void>[] = []
-for (const spec of tasks) {
-  const p = processJob(spec).then(() => executing.splice(executing.indexOf(p), 1))
-  executing.push(p)
-  if (executing.length >= concurrency) await Promise.race(executing)
-}
-await Promise.all(executing)
+const workerCount = Math.max(1, Math.min(concurrency, specs.length))
+const workers = Array.from({ length: workerCount }, (_, workerIndex) => (async () => {
+  for (let index = workerIndex; index < specs.length; index += workerCount) {
+    await processJob(specs[index], settings)
+  }
+})())
+await Promise.all(workers)
 ```
 
-This keeps exactly `concurrency` jobs running at any time, preventing API rate limit errors.
+This keeps bounded parallelism while avoiding scheduler bookkeeping overhead and race-prone shared mutation.
 
 ### Why No SDK?
 The Gemini TypeScript SDK was not used — only `fetch()`. This keeps the bundle lean and avoids SDK version compatibility issues. The API is simple enough (POST JSON, receive base64 images) that a thin fetch wrapper suffices.
 
 ### Why Polling Over WebSocket?
 WebSocket requires additional Node.js setup (the `ws` package and upgrade handling). Since image generation takes 5–30 seconds per image, 2-second polling provides adequate real-time feel without the complexity.
+
+---
+
+## 9. Refactor Phase (Type Safety + Performance)
+
+After initial implementation, a focused refactor pass was applied:
+
+- Type safety fixes:
+  - TS config aligned with `.ts` import usage (`allowImportingTsExtensions`).
+  - Parser typing rewritten to avoid nullable map/filter narrowing issues.
+  - ZIP response normalized to `Uint8Array` response body shape.
+- Runtime/performance fixes:
+  - Batch scheduler switched to bounded worker execution with cleaner terminal status handling (`done`/`partial`).
+  - Client polling changed from async `setInterval` to non-overlapping `setTimeout` loop with in-flight guard.
+  - File I/O improved via cached directory creation and parallel file write/read for save+zip flows.
+
+Verification after refactor:
+
+- `npx tsc --noEmit` passes
+- `npm run build` passes
+- Live Google API smoke tests pass (generation + save + zip)
 
 ---
 

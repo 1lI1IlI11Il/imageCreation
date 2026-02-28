@@ -7,12 +7,19 @@
 ## 1. Environment Check
 
 ```bash
+# From repo root
+cd /path/to/nano-batch
+
 # Node.js 22+ required
 node --version
 # Expected: v22.x.x or higher
 
 # npm available
 npm --version
+
+# Static checks
+npx tsc --noEmit
+npm run build
 
 # Check config file exists after first Settings save
 cat ~/.nano-batch/config.json
@@ -23,7 +30,7 @@ cat ~/.nano-batch/config.json
 ## 2. Server Startup Verification
 
 ```bash
-cd /path/to/imageCreation
+cd /path/to/nano-batch
 npm install
 node --experimental-strip-types server/index.ts
 ```
@@ -128,7 +135,7 @@ print('Skipping: openpyxl not installed. Use sample.csv instead.')
 
 # Test with sample.csv (lowercase headers)
 curl -X POST http://localhost:3001/api/jobs \
-  -F "file=@/path/to/imageCreation/sample.csv" | python3 -c "
+  -F "file=@/path/to/nano-batch/sample.csv" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 print('Specs parsed:', d.get('specCount'))
 assert d.get('specCount') > 0, 'Parser failed'
@@ -192,9 +199,9 @@ elif r['status'] == 'failed':
 ### 5.2 Batch Test (multiple rows)
 ```bash
 JOB_ID=$(curl -s -X POST http://localhost:3001/api/jobs \
-  -F "file=@/path/to/imageCreation/sample.csv" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
+  -F "file=@/path/to/nano-batch/sample.csv" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
 
-# Poll until done
+# Poll until done/partial
 for i in $(seq 1 12); do
   sleep 10
   STATUS=$(curl -s http://localhost:3001/api/jobs/$JOB_ID | python3 -c "
@@ -205,7 +212,7 @@ counts={s:sum(1 for v in r.values() if v['status']==s) for s in ['done','failed'
 print(f'{d[\"status\"]} done={counts[\"done\"]} fail={counts[\"failed\"]} run={counts[\"running\"]} pend={counts[\"pending\"]}')
 ")
   echo "$STATUS"
-  [[ "$STATUS" == done* ]] && break
+  [[ "$STATUS" == done* || "$STATUS" == partial* ]] && break
 done
 ```
 
@@ -236,7 +243,7 @@ print(f'Total image paths: {len(all_images)}, unique: {len(counts)}')
 ## 6. Image File Verification
 
 ```bash
-OUTPUT_DIR="/path/to/imageCreation/output"
+OUTPUT_DIR="/path/to/nano-batch/output"
 
 # Count generated files
 find $OUTPUT_DIR -name "*.png" | wc -l
@@ -306,6 +313,7 @@ with zipfile.ZipFile('/tmp/test-download.zip') as z:
 | `Imagen 4 error 429` | Rate limit | Reduce concurrency in Settings |
 | Images not showing in browser | Server not running | Check `curl http://localhost:3001/` |
 | API key lost after tab switch | Old bug (fixed) | Update to latest version |
+| Batch status is `partial` | Some rows failed while others succeeded | Inspect failed rows in `GET /api/jobs/:id` and retry with lower concurrency |
 
 ---
 
@@ -313,6 +321,8 @@ with zipfile.ZipFile('/tmp/test-download.zip') as z:
 
 Run after any code change:
 
+- [ ] `npx tsc --noEmit` passes
+- [ ] `npm run build` passes
 - [ ] Server starts without error on port 3001
 - [ ] `GET /api/settings` returns `hasApiKey` (not actual key)
 - [ ] `POST /api/settings` without apiKey does not clear existing key
@@ -321,6 +331,7 @@ Run after any code change:
 - [ ] `aspect_ratio: "1;1"` normalizes to `"1:1"` without error
 - [ ] Multiple rows with same label produce unique filenames (`-r{rowIndex}-`)
 - [ ] At least 1 image is generated successfully with valid API key
+- [ ] Batch status is `done` or `partial` with failed rows clearly reported
 - [ ] Generated files are valid PNGs
 - [ ] ZIP download contains all generated images
 - [ ] Browser: Settings tab → API key saves and persists across tab navigation
