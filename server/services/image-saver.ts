@@ -3,8 +3,18 @@ import path from 'path'
 import JSZip from 'jszip'
 import type { JobSpec } from '../types.ts'
 
+const ensuredDirs = new Map<string, Promise<void>>()
+
 export function getOutputDir(outputBase: string, jobId: string): string {
   return path.join(outputBase, jobId)
+}
+
+function ensureDir(dir: string): Promise<void> {
+  const pending = ensuredDirs.get(dir)
+  if (pending) return pending
+  const created = fs.mkdir(dir, { recursive: true }).then(() => undefined)
+  ensuredDirs.set(dir, created)
+  return created
 }
 
 export async function saveImages(
@@ -14,21 +24,16 @@ export async function saveImages(
   outputBase: string
 ): Promise<string[]> {
   const dir = getOutputDir(outputBase, jobId)
-  await fs.mkdir(dir, { recursive: true })
+  await ensureDir(dir)
 
   const safeLabel = spec.label.replace(/[^a-zA-Z0-9가-힣_-]/g, '-') || 'image'
   // Include rowIndex to prevent filename collisions when multiple rows share the same label
   const fileBase = `${safeLabel}-r${spec.rowIndex}`
-  const paths: string[] = []
-
-  for (let i = 0; i < buffers.length; i++) {
-    const filename = `${fileBase}-${i + 1}.png`
-    await fs.writeFile(path.join(dir, filename), buffers[i])
-    paths.push(`${jobId}/${filename}`)
-
-  }
-
-  return paths
+  const filenames = buffers.map((_, index) => `${fileBase}-${index + 1}.png`)
+  await Promise.all(
+    filenames.map((filename, index) => fs.writeFile(path.join(dir, filename), buffers[index]))
+  )
+  return filenames.map((filename) => `${jobId}/${filename}`)
 }
 
 export async function listJobImages(outputBase: string, jobId: string): Promise<string[]> {
@@ -45,9 +50,9 @@ export async function listJobImages(outputBase: string, jobId: string): Promise<
 
 export async function createZipBuffer(filePaths: string[], _outputBase: string): Promise<Buffer> {
   const zip = new JSZip()
-  for (const filePath of filePaths) {
-    const data = await fs.readFile(filePath)
-    zip.file(path.basename(filePath), data)
-  }
+  const fileData = await Promise.all(filePaths.map((filePath) => fs.readFile(filePath)))
+  filePaths.forEach((filePath, index) => {
+    zip.file(path.basename(filePath), fileData[index])
+  })
   return zip.generateAsync({ type: 'nodebuffer' }) as Promise<Buffer>
 }

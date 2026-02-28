@@ -43,20 +43,44 @@ async function processJob(job: BatchJob, spec: JobSpec, settings: Settings) {
   broadcast({ type: 'job_update', jobId: job.id, result: serializeResult(result) })
 }
 
-async function runBatch(job: BatchJob, settings: Settings) {
-  const tasks = [...job.specs]
-  const executing: Promise<void>[] = []
+function resolveFinalStatus(job: BatchJob): BatchJob['status'] {
+  const values = [...job.results.values()]
+  return values.some((r) => r.status === 'failed') ? 'partial' : 'done'
+}
 
-  for (const spec of tasks) {
-    const p: Promise<void> = processJob(job, spec, settings).then(() => {
-      executing.splice(executing.indexOf(p), 1)
+async function runBatch(job: BatchJob, settings: Settings) {
+  const specs = job.specs
+  const workerCount = Math.max(1, Math.min(settings.concurrency, specs.length))
+  const workers = Array.from({ length: workerCount }, (_, workerIndex) => (async () => {
+    for (let index = workerIndex; index < specs.length; index += workerCount) {
+      await processJob(job, specs[index], settings)
+    }
+  })())
+
+  await Promise.all(workers)
+  job.status = resolveFinalStatus(job)
+  broadcast({ type: 'batch_done', jobId: job.id, status: job.status })
+}
+
+function runBatchInBackground(job: BatchJob, settings: Settings) {
+  void runBatch(job, settings).catch((error: unknown) => {
+    job.status = 'partial'
+    broadcast({
+      type: 'batch_error',
+      jobId: job.id,
+      error: error instanceof Error ? error.message : String(error),
     })
-    executing.push(p)
-    if (executing.length >= settings.concurrency) await Promise.race(executing)
-  }
-  await Promise.all(executing)
-  job.status = 'done'
-  broadcast({ type: 'batch_done', jobId: job.id })
+    for (const result of job.results.values()) {
+      if (result.status === 'pending' || result.status === 'running') {
+        result.status = 'failed'
+        result.error = 'Batch interrupted'
+        result.completedAt = Date.now()
+        result.attempts++
+        broadcast({ type: 'job_update', jobId: job.id, result: serializeResult(result) })
+      }
+    }
+    broadcast({ type: 'batch_done', jobId: job.id, status: job.status })
+  })
 }
 
 const app = new Hono()
@@ -90,8 +114,7 @@ app.post('/jobs', async (c) => {
   }
   jobs.set(jobId, job)
 
-  // Run in background (no await)
-  runBatch(job, settings)
+  runBatchInBackground(job, settings)
 
   return c.json({ jobId, specCount: specs.length })
 })

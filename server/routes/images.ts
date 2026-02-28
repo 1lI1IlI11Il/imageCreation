@@ -22,7 +22,7 @@ app.get('/download/:jobId', async (c) => {
   const jobId = c.req.param('jobId')
   const files = await listJobImages(settings.outputFolder, jobId)
   const zip = await createZipBuffer(files, settings.outputFolder)
-  return new Response(zip, {
+  return new Response(new Uint8Array(zip), {
     headers: {
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="nano-batch-${jobId}.zip"`,

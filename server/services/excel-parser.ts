@@ -36,41 +36,42 @@ function parseWorkbook(wb: XLSX.WorkBook, defaults: Partial<Settings>): JobSpec[
   const { valid } = validateColumns(headers)
   if (!valid) throw new Error('prompt column is required. Found columns: ' + headers.join(', '))
 
-  return rows
-    .slice(0, 500)
-    .map((row, rowIndex) => {
-      const get = (key: string) => {
-        const v = row[key] ?? row[key.replace(/_/g, ' ')] ?? ''
-        return String(v).trim()
-      }
+  const specs: JobSpec[] = []
+  const VALID_RATIOS: AspectRatio[] = ['1:1', '16:9', '9:16', '4:3', '3:4']
 
-      const prompt = get('prompt')
-      if (!prompt) return null
+  for (const [rowIndex, row] of rows.slice(0, 500).entries()) {
+    const get = (key: string) => {
+      const v = row[key] ?? row[key.replace(/_/g, ' ')] ?? ''
+      return String(v).trim()
+    }
 
-      const count = Math.min(Math.max(parseInt(get('count')) || 1, 1), 4)
-      const seedRaw = parseInt(get('seed'))
+    const prompt = get('prompt')
+    if (!prompt) continue
 
-      // Normalize aspect ratio: fix semicolons, map unsupported values to nearest
-      const VALID_RATIOS: AspectRatio[] = ['1:1', '16:9', '9:16', '4:3', '3:4']
-      const rawRatio = get('aspect_ratio').replace(/;/g, ':')  // fix "1;1" → "1:1"
-      const aspectRatio: AspectRatio = (VALID_RATIOS.includes(rawRatio as AspectRatio)
-        ? rawRatio
-        : defaults.defaultAspectRatio || '1:1') as AspectRatio
+    const count = Math.min(Math.max(parseInt(get('count'), 10) || 1, 1), 4)
+    const seedRaw = parseInt(get('seed'), 10)
+    const rawRatio = get('aspect_ratio').replace(/;/g, ':')
+    const aspectRatio = VALID_RATIOS.includes(rawRatio as AspectRatio)
+      ? (rawRatio as AspectRatio)
+      : (defaults.defaultAspectRatio || '1:1')
 
-      return {
-        id: crypto.randomUUID(),
-        rowIndex,
-        prompt,
-        style: (get('style') || defaults.defaultStyle || 'photorealistic') as StyleOption,
-        mood: (get('mood') || defaults.defaultMood || 'neutral') as MoodOption,
-        aspectRatio,
-        count,
-        negativePrompt: get('negative_prompt'),
-        seed: isNaN(seedRaw) ? undefined : seedRaw,
-        label: get('label') || `image-${rowIndex}`,
-      } satisfies JobSpec
-    })
-    .filter((s): s is JobSpec => s !== null)
+    const spec: JobSpec = {
+      id: crypto.randomUUID(),
+      rowIndex,
+      prompt,
+      style: (get('style') || defaults.defaultStyle || 'photorealistic') as StyleOption,
+      mood: (get('mood') || defaults.defaultMood || 'neutral') as MoodOption,
+      aspectRatio,
+      count,
+      negativePrompt: get('negative_prompt'),
+      seed: Number.isNaN(seedRaw) ? undefined : seedRaw,
+      label: get('label') || `image-${rowIndex}`,
+    }
+
+    specs.push(spec)
+  }
+
+  return specs
 }
 
 export function parseExcelBuffer(buffer: Buffer, defaults: Partial<Settings>): JobSpec[] {
